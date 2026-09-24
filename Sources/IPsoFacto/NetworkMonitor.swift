@@ -9,9 +9,17 @@ import IPsoFactoCore
 /// safety-net re-check. Never polls faster than that.
 @MainActor
 final class NetworkMonitor {
-    /// Called on the main thread with the newly resolved address (or nil)
-    /// and a human-readable interface description for the menu header.
-    var onChange: ((ResolvedAddress?, String) -> Void)?
+    private static let preferredFamilyKey = "com.sarath.ipsofacto.preferredAddressFamily"
+
+    /// Called on the main thread with the newly resolved address (or nil),
+    /// a human-readable interface description for the menu header, and the
+    /// family that was just resolved (so the caller can render the right
+    /// toggle state even when `resolved` is nil).
+    var onChange: ((ResolvedAddress?, String, AddressFamily) -> Void)?
+
+    /// Which family to resolve and display, persisted across launches.
+    /// Defaults to IPv4 the first time the app ever runs.
+    private(set) var preferredFamily: AddressFamily
 
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "com.sarath.ipsofacto.pathmonitor")
@@ -20,9 +28,29 @@ final class NetworkMonitor {
     private var wakeObserver: NSObjectProtocol?
     private var safetyNetTimer: Timer?
     private var debounceWorkItem: DispatchWorkItem?
+    private let defaults: UserDefaults
 
     private let debounceInterval: TimeInterval = 0.3
     private let safetyNetInterval: TimeInterval = 60.0
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let stored = defaults.string(forKey: Self.preferredFamilyKey), let family = AddressFamily(rawValue: stored) {
+            preferredFamily = family
+        } else {
+            preferredFamily = .ipv4
+        }
+    }
+
+    /// Switches which family is resolved and displayed, persists the
+    /// choice, and immediately re-resolves so the menu bar updates without
+    /// waiting for the next network event.
+    func setPreferredFamily(_ family: AddressFamily) {
+        guard family != preferredFamily else { return }
+        preferredFamily = family
+        defaults.set(family.rawValue, forKey: Self.preferredFamilyKey)
+        performRecheck()
+    }
 
     func start() {
         pathMonitor.pathUpdateHandler = { [weak self] _ in
@@ -69,9 +97,19 @@ final class NetworkMonitor {
         guard let store = SCDynamicStoreCreate(nil, "IPsoFacto" as CFString, callback, &context) else { return }
         dynamicStore = store
 
+        // Watch both families' global and per-interface state, regardless
+        // of which one is currently displayed: the user can toggle
+        // families at any time, and the newly selected family needs live
+        // updates too without re-subscribing.
         let globalIPv4Key = SCDynamicStoreKeyCreateNetworkGlobalEntity(nil, kSCDynamicStoreDomainState, kSCEntNetIPv4) as String
+        let globalIPv6Key = SCDynamicStoreKeyCreateNetworkGlobalEntity(nil, kSCDynamicStoreDomainState, kSCEntNetIPv6) as String
         let interfaceIPv4Pattern = SCDynamicStoreKeyCreateNetworkInterfaceEntity(nil, kSCDynamicStoreDomainState, kSCCompAnyRegex, kSCEntNetIPv4) as String
-        SCDynamicStoreSetNotificationKeys(store, [globalIPv4Key] as CFArray, [interfaceIPv4Pattern] as CFArray)
+        let interfaceIPv6Pattern = SCDynamicStoreKeyCreateNetworkInterfaceEntity(nil, kSCDynamicStoreDomainState, kSCCompAnyRegex, kSCEntNetIPv6) as String
+        SCDynamicStoreSetNotificationKeys(
+            store,
+            [globalIPv4Key, globalIPv6Key] as CFArray,
+            [interfaceIPv4Pattern, interfaceIPv6Pattern] as CFArray
+        )
 
         guard let source = SCDynamicStoreCreateRunLoopSource(nil, store, 0) else { return }
         dynamicStoreRunLoopSource = source
@@ -86,11 +124,11 @@ final class NetworkMonitor {
     }
 
     private func performRecheck() {
-        let candidates = LiveInterfaceAddressSource.currentCandidates()
-        let primaryInterfaceName = LiveInterfaceAddressSource.primaryInterfaceName()
-        let resolved = AddressResolver.resolve(candidates: candidates, primaryInterfaceName: primaryInterfaceName)
+        let candidates = LiveInterfaceAddressSource.currentCandidates(family: preferredFamily)
+        let primaryInterfaceName = LiveInterfaceAddressSource.primaryInterfaceName(family: preferredFamily)
+        let resolved = AddressResolver.resolve(candidates: candidates, primaryInterfaceName: primaryInterfaceName, family: preferredFamily)
         let description = Self.friendlyInterfaceDescription(bsdName: resolved?.interfaceName)
-        onChange?(resolved, description)
+        onChange?(resolved, description, preferredFamily)
     }
 
     /// Maps a BSD interface name to the name System Settings uses for it

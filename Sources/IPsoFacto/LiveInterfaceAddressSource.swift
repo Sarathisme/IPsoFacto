@@ -7,13 +7,19 @@ import IPsoFactoCore
 /// logic lives in AddressResolver, which is pure and tested (Phase 1).
 enum LiveInterfaceAddressSource {
 
-    /// Every IPv4 address on every up interface, in getifaddrs(3)
-    /// enumeration order, unfiltered by interface name.
-    static func currentCandidates() -> [NetworkInterfaceAddress] {
+    /// Every address of `family` on every up interface, in getifaddrs(3)
+    /// enumeration order, unfiltered by interface name. IPv6 link-local
+    /// addresses (fe80::/10) get their interface appended as a zone ID
+    /// (e.g. "fe80::1%en0"), matching how the OS itself represents them --
+    /// a link-local address is only meaningful together with the
+    /// interface it was observed on.
+    static func currentCandidates(family: AddressFamily) -> [NetworkInterfaceAddress] {
         var result: [NetworkInterfaceAddress] = []
         var interfaceOrderByName: [String: Int] = [:]
         var addressCountByName: [String: Int] = [:]
         var nextInterfaceOrder = 0
+
+        let wantedFamily: sa_family_t = family == .ipv4 ? sa_family_t(AF_INET) : sa_family_t(AF_INET6)
 
         var ifaddrPointer: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifaddrPointer) == 0, let firstAddr = ifaddrPointer else { return [] }
@@ -24,13 +30,10 @@ enum LiveInterfaceAddressSource {
             defer { pointer = current.pointee.ifa_next }
 
             guard (Int32(current.pointee.ifa_flags) & IFF_UP) != 0 else { continue }
-            guard let sockaddr = current.pointee.ifa_addr, sockaddr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            guard let sockaddr = current.pointee.ifa_addr, sockaddr.pointee.sa_family == wantedFamily else { continue }
 
             let name = String(cString: current.pointee.ifa_name)
-            var addr = sockaddr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
-            var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-            guard inet_ntop(AF_INET, &addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else { continue }
-            let ipv4Address = String(cString: buffer)
+            guard let addressString = Self.addressString(from: sockaddr, family: family, interfaceName: name) else { continue }
 
             let interfaceOrder = interfaceOrderByName[name] ?? {
                 let order = nextInterfaceOrder
@@ -43,7 +46,8 @@ enum LiveInterfaceAddressSource {
 
             result.append(NetworkInterfaceAddress(
                 interfaceName: name,
-                ipv4Address: ipv4Address,
+                address: addressString,
+                family: family,
                 interfaceOrder: interfaceOrder,
                 addressOrderWithinInterface: addressOrder
             ))
@@ -51,12 +55,29 @@ enum LiveInterfaceAddressSource {
         return result
     }
 
-    /// The BSD name of the interface currently carrying the default
-    /// route, from State:/Network/Global/IPv4's PrimaryInterface key,
-    /// or nil if there is no default route right now.
-    static func primaryInterfaceName() -> String? {
+    private static func addressString(from sockaddr: UnsafeMutablePointer<sockaddr>, family: AddressFamily, interfaceName: String) -> String? {
+        switch family {
+        case .ipv4:
+            var addr = sockaddr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+            var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            guard inet_ntop(AF_INET, &addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else { return nil }
+            return String(cString: buffer)
+        case .ipv6:
+            var addr = sockaddr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee.sin6_addr }
+            var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+            guard inet_ntop(AF_INET6, &addr, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil else { return nil }
+            let address = String(cString: buffer)
+            return AddressResolver.isLinkLocal(address, family: .ipv6) ? "\(address)%\(interfaceName)" : address
+        }
+    }
+
+    /// The BSD name of the interface currently carrying `family`'s default
+    /// route, from State:/Network/Global/<IPv4 or IPv6>'s PrimaryInterface
+    /// key, or nil if there is no default route right now.
+    static func primaryInterfaceName(family: AddressFamily) -> String? {
         guard let store = SCDynamicStoreCreate(nil, "IPsoFacto" as CFString, nil, nil) else { return nil }
-        let key = SCDynamicStoreKeyCreateNetworkGlobalEntity(nil, kSCDynamicStoreDomainState, kSCEntNetIPv4)
+        let entity = family == .ipv4 ? kSCEntNetIPv4 : kSCEntNetIPv6
+        let key = SCDynamicStoreKeyCreateNetworkGlobalEntity(nil, kSCDynamicStoreDomainState, entity)
         guard let value = SCDynamicStoreCopyValue(store, key) as? [String: Any] else { return nil }
         return value[kSCDynamicStorePropNetPrimaryInterface as String] as? String
     }

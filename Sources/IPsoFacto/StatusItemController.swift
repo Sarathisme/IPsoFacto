@@ -12,6 +12,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private var resolvedAddress: ResolvedAddress?
     private var interfaceDescription: String = "Not connected"
+    private var displayedFamily: AddressFamily = .ipv4
+
+    /// Set by AppDelegate; called when the user picks IPv4 or IPv6 from
+    /// the dropdown. The controller doesn't own the family preference
+    /// itself -- NetworkMonitor does, since it's the one that persists and
+    /// re-resolves it.
+    var onFamilyToggle: ((AddressFamily) -> Void)?
 
     init(loginItemManager: LoginItemManager) {
         self.loginItemManager = loginItemManager
@@ -24,9 +31,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     /// Called by NetworkMonitor on every resolved change (main thread).
-    func update(resolved: ResolvedAddress?, interfaceDescription: String) {
+    func update(resolved: ResolvedAddress?, interfaceDescription: String, family: AddressFamily) {
         self.resolvedAddress = resolved
         self.interfaceDescription = interfaceDescription
+        self.displayedFamily = family
         render()
     }
 
@@ -39,23 +47,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Repaints the button (four states) and rebuilds the menu.
     private func render() {
         guard let button = statusItem.button else { return }
+        let familyLabel = displayedFamily == .ipv4 ? "IPv4" : "IPv6"
         switch resolvedAddress {
         case .none:
             button.attributedTitle = NSAttributedString(string: "")
-            button.image = NSImage(systemSymbolName: "network.slash", accessibilityDescription: "No local IPv4 address")
+            button.image = NSImage(systemSymbolName: "network.slash", accessibilityDescription: "No local \(familyLabel) address")
             button.image?.isTemplate = true
-            button.toolTip = "No local IPv4 address"
+            button.toolTip = "No local \(familyLabel) address"
         case .some(let address) where address.category == .linkLocal:
             button.image = nil
             button.toolTip = nil
             button.attributedTitle = NSAttributedString(
-                string: address.ipv4Address,
+                string: address.address,
                 attributes: [.foregroundColor: NSColor.secondaryLabelColor]
             )
         case .some(let address):
             button.image = nil
             button.toolTip = nil
-            button.attributedTitle = NSAttributedString(string: address.ipv4Address)
+            button.attributedTitle = NSAttributedString(string: address.address)
         }
         rebuildMenu()
     }
@@ -67,7 +76,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         headerItem.isEnabled = false
         menu.addItem(headerItem)
 
-        if let resolvedAddress, let qrItem = makeQRCodeMenuItem(ipv4Address: resolvedAddress.ipv4Address) {
+        let ipv4Item = NSMenuItem(title: "Show IPv4 Address", action: #selector(selectIPv4), keyEquivalent: "")
+        ipv4Item.target = self
+        ipv4Item.state = displayedFamily == .ipv4 ? .on : .off
+        menu.addItem(ipv4Item)
+
+        let ipv6Item = NSMenuItem(title: "Show IPv6 Address", action: #selector(selectIPv6), keyEquivalent: "")
+        ipv6Item.target = self
+        ipv6Item.state = displayedFamily == .ipv6 ? .on : .off
+        menu.addItem(ipv6Item)
+
+        menu.addItem(.separator())
+
+        if let resolvedAddress, let qrItem = makeQRCodeMenuItem(address: resolvedAddress.address) {
             menu.addItem(qrItem)
         }
 
@@ -107,7 +128,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(quitItem)
     }
 
-    private func makeQRCodeMenuItem(ipv4Address: String) -> NSMenuItem? {
+    private func makeQRCodeMenuItem(address: String) -> NSMenuItem? {
         let imageSize: CGFloat = 160
         let horizontalPadding: CGFloat = 20
         let verticalPadding: CGFloat = 12
@@ -115,7 +136,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let containerWidth = imageSize + horizontalPadding * 2
         let containerHeight = imageSize + verticalPadding * 2 + labelHeight
 
-        guard let qrImage = QRCodeImageGenerator.image(forPayload: ipv4Address, sizePoints: imageSize) else { return nil }
+        guard let qrImage = QRCodeImageGenerator.image(forPayload: address, sizePoints: imageSize) else { return nil }
 
         let container = NSView(frame: NSRect(x: 0, y: 0, width: containerWidth, height: containerHeight))
 
@@ -124,7 +145,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         imageView.imageScaling = .scaleProportionallyUpOrDown
         container.addSubview(imageView)
 
-        let label = NSTextField(labelWithString: ipv4Address)
+        let label = NSTextField(labelWithString: address)
         label.frame = NSRect(x: 0, y: verticalPadding - 2, width: containerWidth, height: labelHeight)
         label.alignment = .center
         label.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
@@ -140,7 +161,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let address = resolvedAddress else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(address.ipv4Address, forType: .string)
+        pasteboard.setString(address.address, forType: .string)
+    }
+
+    @objc private func selectIPv4() {
+        onFamilyToggle?(.ipv4)
+    }
+
+    @objc private func selectIPv6() {
+        onFamilyToggle?(.ipv6)
     }
 
     @objc private func toggleLaunchAtLogin() {

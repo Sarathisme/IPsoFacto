@@ -18,8 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController = controller
 
         let monitor = NetworkMonitor()
-        monitor.onChange = { [weak controller] resolved, description in
-            controller?.update(resolved: resolved, interfaceDescription: description)
+        monitor.onChange = { [weak controller] resolved, description, family in
+            controller?.update(resolved: resolved, interfaceDescription: description, family: family)
+        }
+        controller.onFamilyToggle = { [weak monitor] family in
+            monitor?.setPreferredFamily(family)
         }
         networkMonitor = monitor
         monitor.start()

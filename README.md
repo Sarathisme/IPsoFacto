@@ -16,15 +16,17 @@ developer: right-click (or Control-click) the app in Finder and choose
 
 ## What it does
 
-- Shows the active network interface's IPv4 address as plain text in the
-  menu bar (e.g. `192.168.1.4`), not just an icon.
+- Shows the active network interface's address as plain text in the menu
+  bar (e.g. `192.168.1.4`), not just an icon — switch between **IPv4** and
+  **IPv6** from the dropdown, and it remembers your choice.
 - Updates live — on network changes, DHCP lease renewals, VPN connect, and
   wake from sleep — usually within a couple of seconds.
 - Skips loopback, VPN/tunnel interfaces, and other virtual adapters so you
   always see your real LAN address, even with a VPN active.
-- Click the menu bar item for a small dropdown: interface name, a **QR
-  code** of the current IP for scanning with your phone, **Copy IP
-  Address**, a **Launch at Login** toggle, About, and Quit.
+- Click the menu bar item for a small dropdown: interface name, an **IPv4
+  / IPv6** toggle, a **QR code** of the current address for scanning with
+  your phone, **Copy IP Address**, a **Launch at Login** toggle, About,
+  and Quit.
 - Runs as a true background utility: no Dock icon, no Cmd-Tab entry.
 - Launches at login via `SMAppService` (macOS's modern login-item API).
 
