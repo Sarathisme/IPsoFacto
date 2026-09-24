@@ -146,10 +146,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         container.addSubview(imageView)
 
         let label = NSTextField(labelWithString: address)
+        // NSTextField(labelWithString:) opts into Auto Layout by default
+        // (translatesAutoresizingMaskIntoConstraints = false), so its intrinsic
+        // content size -- the label's full, unclipped text width -- can
+        // still influence how wide AppKit sizes this custom-view menu row,
+        // even though we set an explicit frame below. For a long IPv6
+        // address that's wider than the fixed container, that stretches
+        // the row while imageView stays pinned to its original x offset,
+        // making the QR code look pushed left instead of centered. Forcing
+        // frame-based layout here makes the label's frame the only input
+        // AppKit uses, matching every other view in this container.
+        label.translatesAutoresizingMaskIntoConstraints = true
         label.frame = NSRect(x: 0, y: verticalPadding - 2, width: containerWidth, height: labelHeight)
         label.alignment = .center
         label.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingMiddle
         container.addSubview(label)
 
         let item = NSMenuItem()
