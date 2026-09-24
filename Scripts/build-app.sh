@@ -41,6 +41,7 @@ mkdir -p "$APP_BUNDLE_DIR/Contents/MacOS"
 mkdir -p "$APP_BUNDLE_DIR/Contents/Resources"
 cp "$BINARY_PATH" "$APP_BUNDLE_DIR/Contents/MacOS/$EXECUTABLE_NAME"
 cp Resources/Info.plist "$APP_BUNDLE_DIR/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP_BUNDLE_DIR/Contents/Resources/AppIcon.icns"
 
 echo "==> Ad-hoc signing"
 codesign --force --deep --sign - "$APP_BUNDLE_DIR"
