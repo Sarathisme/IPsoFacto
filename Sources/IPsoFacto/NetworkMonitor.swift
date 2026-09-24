@@ -3,6 +3,16 @@ import Network
 import SystemConfiguration
 import IPsoFactoCore
 
+/// One consistent view of network state, delivered to `onChange` on
+/// every resolve. Bundles the single "best" address (unchanged from
+/// before Phase 1) alongside every other active interface (FR-6).
+struct NetworkSnapshot: Equatable {
+    let resolved: ResolvedAddress?
+    let interfaceDescription: String
+    let family: AddressFamily
+    let allInterfaces: [ResolvedAddress]
+}
+
 /// Re-evaluates the address on every path change, every
 /// same-path address change, and every wake, debounced so a
 /// burst of events collapses into one final update, plus a 60 s
@@ -11,11 +21,9 @@ import IPsoFactoCore
 final class NetworkMonitor {
     private static let preferredFamilyKey = "com.sarath.ipsofacto.preferredAddressFamily"
 
-    /// Called on the main thread with the newly resolved address (or nil),
-    /// a human-readable interface description for the menu header, and the
-    /// family that was just resolved (so the caller can render the right
-    /// toggle state even when `resolved` is nil).
-    var onChange: ((ResolvedAddress?, String, AddressFamily) -> Void)?
+    /// Called on the main thread with the newly resolved network state on
+    /// every recheck (network change, wake, or the 60 s safety net).
+    var onChange: ((NetworkSnapshot) -> Void)?
 
     /// Which family to resolve and display, persisted across launches.
     /// Defaults to IPv4 the first time the app ever runs.
@@ -127,8 +135,9 @@ final class NetworkMonitor {
         let candidates = LiveInterfaceAddressSource.currentCandidates(family: preferredFamily)
         let primaryInterfaceName = LiveInterfaceAddressSource.primaryInterfaceName(family: preferredFamily)
         let resolved = AddressResolver.resolve(candidates: candidates, primaryInterfaceName: primaryInterfaceName, family: preferredFamily)
+        let allInterfaces = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: primaryInterfaceName, family: preferredFamily)
         let description = Self.friendlyInterfaceDescription(bsdName: resolved?.interfaceName)
-        onChange?(resolved, description, preferredFamily)
+        onChange?(NetworkSnapshot(resolved: resolved, interfaceDescription: description, family: preferredFamily, allInterfaces: allInterfaces))
     }
 
     /// Maps a BSD interface name to the name System Settings uses for it

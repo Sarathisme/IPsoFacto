@@ -3,6 +3,9 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let loginItemManager = LoginItemManager()
+    private let preferencesStore = PreferencesStore()
+    private let wifiInfoProvider = WiFiInfoProvider()
+    private let hotKeyManager = GlobalHotKeyManager()
     private var statusItemController: StatusItemController?
     private var networkMonitor: NetworkMonitor?
 
@@ -14,12 +17,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         loginItemManager.registerOnFirstLaunchIfNeeded()
 
-        let controller = StatusItemController(loginItemManager: loginItemManager)
+        let controller = StatusItemController(loginItemManager: loginItemManager, preferencesStore: preferencesStore, wifiInfoProvider: wifiInfoProvider, hotKeyManager: hotKeyManager)
         statusItemController = controller
 
+        hotKeyManager.onHotKeyPressed = { [weak controller] in controller?.copyCurrentAddressToClipboard() }
+        if let hotkey = preferencesStore.hotkey {
+            hotKeyManager.register(hotkey)
+        }
+
         let monitor = NetworkMonitor()
-        monitor.onChange = { [weak controller] resolved, description, family in
-            controller?.update(resolved: resolved, interfaceDescription: description, family: family)
+        monitor.onChange = { [weak controller] snapshot in
+            controller?.update(snapshot: snapshot)
         }
         controller.onFamilyToggle = { [weak monitor] family in
             monitor?.setPreferredFamily(family)

@@ -26,5 +26,11 @@
     <string>Personal utility. Not for distribution.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSLocationUsageDescription</key>
+    <string>IPso Facto uses Location Services only to read the current Wi-Fi network name and signal strength shown in its menu — no location data is stored, logged, or transmitted.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>IPso Facto uses Location Services only to read the current Wi-Fi network name and signal strength shown in its menu — no location data is stored, logged, or transmitted.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>IPso Facto uses Location Services only to read the current Wi-Fi network name and signal strength shown in its menu — no location data is stored, logged, or transmitted.</string>
 </dict>
 </plist>

@@ -27,42 +27,11 @@ public enum AddressResolver {
         primaryInterfaceName: String?,
         family: AddressFamily
     ) -> ResolvedAddress? {
-        let eligible = candidates.filter { candidate in
-            candidate.family == family &&
-            !excludedInterfacePrefixes.contains { candidate.interfaceName.hasPrefix($0) }
-        }
+        let eligible = eligibleCandidates(candidates, family: family)
         guard !eligible.isEmpty else { return nil }
 
-        let chosenInterfaceName: String
-        if let primaryInterfaceName,
-           eligible.contains(where: { $0.interfaceName == primaryInterfaceName }) {
-            chosenInterfaceName = primaryInterfaceName
-        } else {
-            // No usable primary-interface signal: fall back to the
-            // lowest-interfaceOrder eligible interface (FR-2's "OS order").
-            chosenInterfaceName = eligible
-                .min(by: { $0.interfaceOrder < $1.interfaceOrder })!
-                .interfaceName
-        }
-
-        // Among the chosen interface's addresses, prefer a normal (routable)
-        // one over a link-local one, falling back to system order only to
-        // break ties within the same category. This matters far more for
-        // IPv6 than IPv4: a link-local address (fe80::/10) coexists with a
-        // global address on essentially every interface and is frequently
-        // enumerated first, so a plain "first in system order" pick would
-        // often surface the less useful link-local address instead of the
-        // actual routable one. IPv4 link-local is rare (DHCP failure only),
-        // so this preference is a no-op there in practice.
-        guard let chosen = eligible
-            .filter({ $0.interfaceName == chosenInterfaceName })
-            .min(by: { lhs, rhs in
-                let lhsLinkLocal = isLinkLocal(lhs.address, family: family)
-                let rhsLinkLocal = isLinkLocal(rhs.address, family: family)
-                if lhsLinkLocal != rhsLinkLocal { return !lhsLinkLocal }
-                return lhs.addressOrderWithinInterface < rhs.addressOrderWithinInterface
-            })
-        else { return nil }
+        let chosenInterfaceName = choosePrimaryInterfaceName(eligible: eligible, primaryInterfaceName: primaryInterfaceName)
+        guard let chosen = chooseAddress(interfaceName: chosenInterfaceName, among: eligible, family: family) else { return nil }
 
         return ResolvedAddress(
             interfaceName: chosen.interfaceName,
@@ -70,6 +39,41 @@ public enum AddressResolver {
             family: family,
             category: isLinkLocal(chosen.address, family: family) ? .linkLocal : .normal
         )
+    }
+
+    /// Same eligibility rules as `resolve()`, but returns one
+    /// `ResolvedAddress` per active, eligible interface (FR-6: "all
+    /// interfaces" view) instead of just the single best one, ordered by
+    /// `NetworkInterfaceAddress.interfaceOrder`. Exactly one entry (the
+    /// same interface `resolve()` would have chosen) has `isPrimary ==
+    /// true`; all others have `isPrimary == false`. Returns `[]` if no
+    /// interface is eligible.
+    public static func resolveAll(
+        candidates: [NetworkInterfaceAddress],
+        primaryInterfaceName: String?,
+        family: AddressFamily
+    ) -> [ResolvedAddress] {
+        let eligible = eligibleCandidates(candidates, family: family)
+        guard !eligible.isEmpty else { return [] }
+
+        let chosenInterfaceName = choosePrimaryInterfaceName(eligible: eligible, primaryInterfaceName: primaryInterfaceName)
+
+        var interfaceOrderByName: [String: Int] = [:]
+        for candidate in eligible where interfaceOrderByName[candidate.interfaceName] == nil {
+            interfaceOrderByName[candidate.interfaceName] = candidate.interfaceOrder
+        }
+        let orderedInterfaceNames = interfaceOrderByName.keys.sorted { interfaceOrderByName[$0]! < interfaceOrderByName[$1]! }
+
+        return orderedInterfaceNames.compactMap { name -> ResolvedAddress? in
+            guard let chosen = chooseAddress(interfaceName: name, among: eligible, family: family) else { return nil }
+            return ResolvedAddress(
+                interfaceName: chosen.interfaceName,
+                address: chosen.address,
+                family: family,
+                category: isLinkLocal(chosen.address, family: family) ? .linkLocal : .normal,
+                isPrimary: name == chosenInterfaceName
+            )
+        }
     }
 
     /// True for a link-local address in `address`'s family: any IPv4
@@ -84,5 +88,38 @@ public enum AddressResolver {
             let prefix = address.lowercased().prefix(3)
             return prefix == "fe8" || prefix == "fe9" || prefix == "fea" || prefix == "feb"
         }
+    }
+
+    private static func eligibleCandidates(_ candidates: [NetworkInterfaceAddress], family: AddressFamily) -> [NetworkInterfaceAddress] {
+        candidates.filter { candidate in
+            candidate.family == family &&
+            !excludedInterfacePrefixes.contains { candidate.interfaceName.hasPrefix($0) }
+        }
+    }
+
+    /// FR-2's "OS order" fallback: the primary-route interface if it's
+    /// eligible, else the lowest-`interfaceOrder` eligible interface.
+    /// `eligible` must be non-empty.
+    private static func choosePrimaryInterfaceName(eligible: [NetworkInterfaceAddress], primaryInterfaceName: String?) -> String {
+        if let primaryInterfaceName, eligible.contains(where: { $0.interfaceName == primaryInterfaceName }) {
+            return primaryInterfaceName
+        }
+        return eligible.min(by: { $0.interfaceOrder < $1.interfaceOrder })!.interfaceName
+    }
+
+    /// Among `interfaceName`'s addresses within `eligible`, prefer a
+    /// normal (routable) one over a link-local one, falling back to
+    /// system order only to break ties within the same category. See
+    /// `resolve()`'s original doc comment for why this matters more for
+    /// IPv6 than IPv4.
+    private static func chooseAddress(interfaceName: String, among eligible: [NetworkInterfaceAddress], family: AddressFamily) -> NetworkInterfaceAddress? {
+        eligible
+            .filter { $0.interfaceName == interfaceName }
+            .min(by: { lhs, rhs in
+                let lhsLinkLocal = isLinkLocal(lhs.address, family: family)
+                let rhsLinkLocal = isLinkLocal(rhs.address, family: family)
+                if lhsLinkLocal != rhsLinkLocal { return !lhsLinkLocal }
+                return lhs.addressOrderWithinInterface < rhs.addressOrderWithinInterface
+            })
     }
 }

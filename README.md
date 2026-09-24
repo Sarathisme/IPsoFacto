@@ -25,8 +25,16 @@ developer: right-click (or Control-click) the app in Finder and choose
   always see your real LAN address, even with a VPN active.
 - Click the menu bar item for a small dropdown: interface name, an **IPv4
   / IPv6** toggle, a **QR code** of the current address for scanning with
-  your phone, **Copy IP Address**, a **Launch at Login** toggle, About,
-  and Quit.
+  your phone, **Copy IP Address**, a **Launch at Login** toggle, an **All
+  Interfaces** list showing every active interface's address with the
+  current pick checked, and a **Preferences…** item to choose how the menu
+  bar text is displayed (IP only, IP + interface, IP + Wi-Fi name & signal
+  strength, hostname, or a custom
+  {ip}/{interface}/{hostname} template), and (opt-in via Preferences) the
+  current **Wi-Fi network name and signal strength**, and a
+  user-configurable **global hotkey** (set in Preferences) to copy the
+  current IP from any app, a **Run Speed Test** item showing download/upload
+  Mbps once complete, About, and Quit.
 - Runs as a true background utility: no Dock icon, no Cmd-Tab entry.
 - Launches at login via `SMAppService` (macOS's modern login-item API).
 

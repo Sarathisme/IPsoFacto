@@ -228,4 +228,110 @@ struct AddressResolverTests {
         let result = AddressResolver.resolve(candidates: candidates, primaryInterfaceName: "en0", family: .ipv6)
         #expect(result == ResolvedAddress(interfaceName: "en0", address: "fe80::1%en0", family: .ipv6, category: .linkLocal))
     }
+
+    @Test("resolveAll: Ethernet+Wi-Fi both returned, primary interface flagged isPrimary")
+    func resolveAllFlagsPrimaryAmongMultipleInterfaces() {
+        let candidates = [
+            NetworkInterfaceAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, interfaceOrder: 0, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "en5", address: "10.0.0.9", family: .ipv4, interfaceOrder: 1, addressOrderWithinInterface: 0)
+        ]
+        let result = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: "en5", family: .ipv4)
+        #expect(result == [
+            ResolvedAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, category: .normal, isPrimary: false),
+            ResolvedAddress(interfaceName: "en5", address: "10.0.0.9", family: .ipv4, category: .normal, isPrimary: true)
+        ])
+    }
+
+    @Test("resolveAll: utun is excluded from the all-interfaces list, matching resolve()'s exclusion")
+    func resolveAllExcludesVPNInterface() {
+        let candidates = [
+            NetworkInterfaceAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, interfaceOrder: 0, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "utun0", address: "10.8.0.2", family: .ipv4, interfaceOrder: 1, addressOrderWithinInterface: 0)
+        ]
+        let result = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: nil, family: .ipv4)
+        #expect(result == [ResolvedAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, category: .normal, isPrimary: true)])
+    }
+
+    @Test("resolveAll: no primary-interface signal falls back to lowest interfaceOrder, same as resolve()")
+    func resolveAllFallsBackToInterfaceOrderForPrimary() {
+        let candidates = [
+            NetworkInterfaceAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, interfaceOrder: 0, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "en5", address: "10.0.0.9", family: .ipv4, interfaceOrder: 1, addressOrderWithinInterface: 0)
+        ]
+        let result = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: nil, family: .ipv4)
+        #expect(result.first(where: { $0.interfaceName == "en0" })?.isPrimary == true)
+        #expect(result.first(where: { $0.interfaceName == "en5" })?.isPrimary == false)
+    }
+
+    @Test("resolveAll: no eligible interfaces yields an empty array, not nil-crash")
+    func resolveAllEmptyWhenNoEligibleCandidates() {
+        let candidates = [
+            NetworkInterfaceAddress(interfaceName: "lo0", address: "127.0.0.1", family: .ipv4, interfaceOrder: 0, addressOrderWithinInterface: 0)
+        ]
+        #expect(AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: nil, family: .ipv4) == [])
+    }
+
+    @Test("resolveAll: an interface with multiple addresses contributes exactly one entry, picking the same lowest-addressOrderWithinInterface address resolve() would")
+    func resolveAllPicksOneAddressPerInterfaceWithMultipleAddresses() {
+        let candidates = [
+            NetworkInterfaceAddress(interfaceName: "en0", address: "192.168.1.50", family: .ipv4, interfaceOrder: 0, addressOrderWithinInterface: 1),
+            NetworkInterfaceAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, interfaceOrder: 0, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "en5", address: "10.0.0.9", family: .ipv4, interfaceOrder: 1, addressOrderWithinInterface: 0)
+        ]
+        let result = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: "en0", family: .ipv4)
+        #expect(result == [
+            ResolvedAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, category: .normal, isPrimary: true),
+            ResolvedAddress(interfaceName: "en5", address: "10.0.0.9", family: .ipv4, category: .normal, isPrimary: false)
+        ])
+    }
+
+    @Test("resolveAll: an interface's normal address is preferred over its link-local address, just like resolve()'s per-interface tie-break")
+    func resolveAllPrefersNormalOverLinkLocalPerInterface() {
+        let candidates = [
+            NetworkInterfaceAddress(interfaceName: "en0", address: "fe80::1%en0", family: .ipv6, interfaceOrder: 0, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "en0", address: "2601:441:4200:1234::1", family: .ipv6, interfaceOrder: 0, addressOrderWithinInterface: 1)
+        ]
+        let result = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: "en0", family: .ipv6)
+        #expect(result == [ResolvedAddress(interfaceName: "en0", address: "2601:441:4200:1234::1", family: .ipv6, category: .normal, isPrimary: true)])
+    }
+
+    @Test("resolveAll: mixed IPv4/IPv6 candidates on the same interfaces only return the requested family, matching resolve()'s family filter")
+    func resolveAllFiltersOutOtherFamily() {
+        let candidates = [
+            NetworkInterfaceAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, interfaceOrder: 0, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "en0", address: "2601:441:4200:1234::1", family: .ipv6, interfaceOrder: 0, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "en5", address: "10.0.0.9", family: .ipv4, interfaceOrder: 1, addressOrderWithinInterface: 0)
+        ]
+        let ipv4Result = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: "en0", family: .ipv4)
+        #expect(ipv4Result == [
+            ResolvedAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, category: .normal, isPrimary: true),
+            ResolvedAddress(interfaceName: "en5", address: "10.0.0.9", family: .ipv4, category: .normal, isPrimary: false)
+        ])
+
+        let ipv6Result = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: "en0", family: .ipv6)
+        #expect(ipv6Result == [ResolvedAddress(interfaceName: "en0", address: "2601:441:4200:1234::1", family: .ipv6, category: .normal, isPrimary: true)])
+    }
+
+    @Test("resolveAll: three or more eligible interfaces are ordered by interfaceOrder regardless of candidate enumeration order, with exactly one isPrimary")
+    func resolveAllOrdersThreeInterfacesByInterfaceOrder() {
+        let candidates = [
+            NetworkInterfaceAddress(interfaceName: "en5", address: "10.0.0.9", family: .ipv4, interfaceOrder: 2, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, interfaceOrder: 0, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "en7", address: "172.20.10.5", family: .ipv4, interfaceOrder: 1, addressOrderWithinInterface: 0)
+        ]
+        let result = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: "en5", family: .ipv4)
+        #expect(result.map(\.interfaceName) == ["en0", "en7", "en5"])
+        #expect(result.map(\.isPrimary) == [false, false, true])
+    }
+
+    @Test("resolveAll: primaryInterfaceName names an interface entirely absent from eligible candidates; falls back to lowest interfaceOrder for isPrimary, same as resolve()'s stale-signal fallback")
+    func resolveAllStalePrimaryFallsBackToLowestOrder() {
+        let candidates = [
+            NetworkInterfaceAddress(interfaceName: "en5", address: "10.0.0.9", family: .ipv4, interfaceOrder: 1, addressOrderWithinInterface: 0),
+            NetworkInterfaceAddress(interfaceName: "en0", address: "192.168.1.4", family: .ipv4, interfaceOrder: 0, addressOrderWithinInterface: 0)
+        ]
+        let result = AddressResolver.resolveAll(candidates: candidates, primaryInterfaceName: "en9", family: .ipv4)
+        #expect(result.first(where: { $0.interfaceName == "en0" })?.isPrimary == true)
+        #expect(result.first(where: { $0.interfaceName == "en5" })?.isPrimary == false)
+    }
 }

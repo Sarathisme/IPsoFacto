@@ -13,11 +13,16 @@ public struct ResolvedAddress: Equatable, Sendable {
     public let address: String
     public let family: AddressFamily
     public let category: ResolvedAddressCategory
+    /// True for the one entry `AddressResolver.resolveAll()` marks as the
+    /// same address `AddressResolver.resolve()` would have chosen alone.
+    /// Always true for a `ResolvedAddress` returned by `resolve()`.
+    public let isPrimary: Bool
 
-    public init(interfaceName: String, address: String, family: AddressFamily, category: ResolvedAddressCategory) {
+    public init(interfaceName: String, address: String, family: AddressFamily, category: ResolvedAddressCategory, isPrimary: Bool = true) {
         self.interfaceName = interfaceName
         self.address = address
         self.family = family
         self.category = category
+        self.isPrimary = isPrimary
     }
 }
