@@ -67,6 +67,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         headerItem.isEnabled = false
         menu.addItem(headerItem)
 
+        if let resolvedAddress, let qrItem = makeQRCodeMenuItem(ipv4Address: resolvedAddress.ipv4Address) {
+            menu.addItem(qrItem)
+        }
+
         let copyItem = NSMenuItem(title: "Copy IP Address", action: #selector(copyIPAddress), keyEquivalent: "c")
         copyItem.target = self
         copyItem.isEnabled = resolvedAddress != nil
@@ -101,6 +105,35 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let quitItem = NSMenuItem(title: "Quit IPso Facto", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.target = NSApp
         menu.addItem(quitItem)
+    }
+
+    private func makeQRCodeMenuItem(ipv4Address: String) -> NSMenuItem? {
+        let imageSize: CGFloat = 160
+        let horizontalPadding: CGFloat = 20
+        let verticalPadding: CGFloat = 12
+        let labelHeight: CGFloat = 16
+        let containerWidth = imageSize + horizontalPadding * 2
+        let containerHeight = imageSize + verticalPadding * 2 + labelHeight
+
+        guard let qrImage = QRCodeImageGenerator.image(forPayload: ipv4Address, sizePoints: imageSize) else { return nil }
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: containerWidth, height: containerHeight))
+
+        let imageView = NSImageView(frame: NSRect(x: horizontalPadding, y: verticalPadding + labelHeight, width: imageSize, height: imageSize))
+        imageView.image = qrImage
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        container.addSubview(imageView)
+
+        let label = NSTextField(labelWithString: ipv4Address)
+        label.frame = NSRect(x: 0, y: verticalPadding - 2, width: containerWidth, height: labelHeight)
+        label.alignment = .center
+        label.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        label.textColor = .secondaryLabelColor
+        container.addSubview(label)
+
+        let item = NSMenuItem()
+        item.view = container
+        return item
     }
 
     @objc private func copyIPAddress() {

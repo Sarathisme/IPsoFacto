@@ -6,6 +6,14 @@ off a `192.168.x.x`.
 
 <img src="Resources/AppIcon-1024.png" width="160" alt="IPso Facto app icon: a magnifying glass inspecting a Wi-Fi signal">
 
+[![Download IPso Facto](https://img.shields.io/badge/Download-IPso%20Facto-F36F56?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/Sarathisme/IPsoFacto/releases/latest/download/IPsoFacto.zip)
+
+Every push to `main` is built and signed automatically — the button above
+always points at the latest build. It's ad-hoc signed, not notarized, so
+the first time you open it macOS will warn that it's from an unidentified
+developer: right-click (or Control-click) the app in Finder and choose
+**Open**, then confirm, to get past that one-time prompt.
+
 ## What it does
 
 - Shows the active network interface's IPv4 address as plain text in the
@@ -14,7 +22,8 @@ off a `192.168.x.x`.
   wake from sleep — usually within a couple of seconds.
 - Skips loopback, VPN/tunnel interfaces, and other virtual adapters so you
   always see your real LAN address, even with a VPN active.
-- Click the menu bar item for a small dropdown: interface name, **Copy IP
+- Click the menu bar item for a small dropdown: interface name, a **QR
+  code** of the current IP for scanning with your phone, **Copy IP
   Address**, a **Launch at Login** toggle, About, and Quit.
 - Runs as a true background utility: no Dock icon, no Cmd-Tab entry.
 - Launches at login via `SMAppService` (macOS's modern login-item API).

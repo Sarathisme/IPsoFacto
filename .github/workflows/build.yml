@@ -1,0 +1,35 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: Scripts/run-tests.sh
+
+      - name: Build and package IPso Facto.app
+        run: Scripts/package-app.sh
+
+      - name: Publish latest build as a GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          gh release delete latest --yes || true
+          git push origin :refs/tags/latest || true
+          gh release create latest dist/IPsoFacto.zip \
+            --title "IPso Facto (latest build)" \
+            --notes "Automatically built from ${{ github.sha }} on push to ${{ github.ref_name }}. Ad-hoc signed, not notarized — see the README for first-launch instructions." \
+            --target "${{ github.sha }}"

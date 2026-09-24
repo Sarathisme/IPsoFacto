@@ -3,6 +3,12 @@
 .swiftpm/
 Package.resolved
 
+# Packaged distributables (Scripts/package-app.sh)
+dist/
+
+# Planning artifacts from the ship-change/ship-feature pipeline
+.docs/
+
 # Xcode (in case Xcode.app is installed later)
 DerivedData/
 *.xcuserstate
