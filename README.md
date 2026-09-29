@@ -34,7 +34,10 @@ developer: right-click (or Control-click) the app in Finder and choose
   current **Wi-Fi network name and signal strength**, and a
   user-configurable **global hotkey** (set in Preferences) to copy the
   current IP from any app, a **Run Speed Test** item showing download/upload
-  Mbps once complete, About, and Quit.
+  Mbps once complete, a **Ports & Processes** window that lists listening
+  Node/Metro, Python, Bun, Deno, Ruby, PHP, Java, Go, Rust, and .NET servers
+  processes and ports with filtering, refresh, and localhost open actions,
+  About, and Quit.
 - Runs as a true background utility: no Dock icon, no Cmd-Tab entry.
 - Launches at login via `SMAppService` (macOS's modern login-item API).
 

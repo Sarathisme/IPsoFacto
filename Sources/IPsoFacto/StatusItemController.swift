@@ -3,17 +3,10 @@ import CoreWLAN
 import Foundation
 import IPsoFactoCore
 
-/// Container for `makeRowButtonMenuItem`'s rows. Those rows use a custom
-/// `NSMenuItem.view` (needed for consistent left-inset alignment between
-/// "Copy IP Address" and "Run Speed Test"), which opts the row out of
-/// AppKit's automatic hover-highlight drawing. `enclosingMenuItem.isHighlighted`
-/// is not reliably kept fresh for a custom view -- it only visibly worked
-/// after the speed test's own `rebuildMenu()` calls (while running) forced
-/// a re-layout that happened to recompute it at the right moment, not on a
-/// menu that opens and never rebuilds. Tracking the mouse ourselves via
-/// `NSTrackingArea` is independent of any of that and reflects real hover
-/// state on every open.
-private final class HighlightableMenuRowView: NSView {
+/// A button-backed menu row used only for the in-progress speed test. AppKit
+/// dismisses a menu after a normal menu-item action; a view-backed button lets
+/// the test update its status in the open menu instead.
+private final class PersistentMenuActionRowView: NSView {
     private let button: NSButton
     private var isMouseInside = false
     private var trackingArea: NSTrackingArea?
@@ -24,15 +17,11 @@ private final class HighlightableMenuRowView: NSView {
         addSubview(button)
     }
 
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
+        if let trackingArea { removeTrackingArea(trackingArea) }
         let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
         addTrackingArea(area)
         trackingArea = area
@@ -77,6 +66,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var displayedFamily: AddressFamily = .ipv4
     private var allInterfaces: [ResolvedAddress] = []
     private var speedTestState: SpeedTestState = .idle
+    private var developmentPorts: [DevelopmentPort] = []
+    private lazy var developmentPortsWindowController = DevelopmentPortsWindowController(
+        portsProvider: { [weak self] in
+            let ports = DevelopmentPortDiscovery.scan()
+            self?.developmentPorts = ports
+            return ports
+        }
+    )
 
     private enum SpeedTestState {
         case idle
@@ -100,6 +97,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         super.init()
         statusItem.menu = menu
         menu.delegate = self
+        menu.autoenablesItems = false
         statusItem.button?.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         preferencesStore.onChange = { [weak self] in self?.render() }
         wifiInfoProvider.onAuthorizationChange = { [weak self] in self?.render() }
@@ -118,6 +116,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Recompute the Launch at Login row's live status every time
     /// the menu opens, not just on network change.
     func menuWillOpen(_ menu: NSMenu) {
+        developmentPorts = DevelopmentPortDiscovery.scan()
         rebuildMenu()
     }
 
@@ -224,11 +223,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(qrItem)
         }
 
-        let copyItem = makeRowButtonMenuItem(title: "Copy IP Address", action: #selector(copyIPAddress), keyEquivalent: "c")
-        copyItem.isEnabled = resolvedAddress != nil
-        menu.addItem(copyItem)
+        menu.addItem(makeActionMenuItem(title: "Copy IP Address", action: #selector(copyIPAddress), keyEquivalent: "c", enabled: resolvedAddress != nil))
 
         menu.addItem(makeSpeedTestMenuItem())
+
+        menu.addItem(makeDevelopmentPortsMenuItem())
 
         menu.addItem(.separator())
 
@@ -256,13 +255,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let aboutItem = NSMenuItem(title: "About IPso Facto", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
-        aboutItem.target = NSApp
+        // Route these through our own actions so AppKit does not add system
+        // icons that indent only these titles relative to the other rows.
+        let aboutItem = NSMenuItem(title: "About IPso Facto", action: #selector(showAboutPanel), keyEquivalent: "")
+        aboutItem.target = self
         menu.addItem(aboutItem)
 
-        let quitItem = NSMenuItem(title: "Quit IPso Facto", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        quitItem.target = NSApp
+        let quitItem = NSMenuItem(title: "Quit IPso Facto", action: #selector(quitApp), keyEquivalent: "q")
+        quitItem.target = self
         menu.addItem(quitItem)
+
+        // Custom rows keep their own widths. Give the QR block and speed
+        // test the same width so the QR stays centered in the wider menu.
+        let customViews = menu.items.compactMap(\.view)
+        if let width = customViews.map({ $0.frame.width }).max() {
+            for view in customViews {
+                view.setFrameSize(NSSize(width: width, height: view.frame.height))
+            }
+        }
     }
 
     private func makeQRCodeMenuItem(address: String) -> NSMenuItem? {
@@ -308,6 +318,25 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return item
     }
 
+    private func makeDevelopmentPortsMenuItem() -> NSMenuItem {
+        let title = developmentPorts.isEmpty ? "Ports & Processes" : "Ports & Processes (\(developmentPorts.count))"
+        // A standard menu item lets AppKit keep this row aligned with the
+        // rest of the menu; no custom insets or view-backed menu row needed.
+        let item = NSMenuItem(title: title, action: #selector(openDevelopmentPorts), keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    @objc private func openDevelopmentPorts() {
+        developmentPortsWindowController.showModal()
+    }
+
+    private func copyToPasteboard(_ string: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(string, forType: .string)
+    }
+
     @objc private func copyIPAddress() {
         copyCurrentAddressToClipboard()
     }
@@ -316,9 +345,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Same silent-copy behavior as the menu item (Decision #13).
     func copyCurrentAddressToClipboard() {
         guard let address = resolvedAddress else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(address.address, forType: .string)
+        copyToPasteboard(address.address)
     }
 
     @objc private func selectIPv4() {
@@ -342,49 +369,47 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         preferencesWindowController.show()
     }
 
-    /// Builds an NSMenuItem whose row is a button in a custom view rather
-    /// than a plain NSMenuItem with an action. Used for every row that must
-    /// stay clickable without the exact system-reserved title indentation
-    /// mattering (Copy IP Address, Run Speed Test): since both rows are
-    /// built by this same method with the same fixed inset, they always
-    /// line up with each other, regardless of what AppKit's own undocumented
-    /// checkmark-gutter spacing happens to be for standard menu items.
-    /// `keyEquivalent`, if non-empty, still works while the menu is open
-    /// (NSMenu matches it independently of whether the item has a custom
-    /// view) even though it isn't drawn as a hint on the row.
-    private func makeRowButtonMenuItem(title: String, action: Selector, keyEquivalent: String = "", enabled: Bool = true) -> NSMenuItem {
-        let height: CGFloat = 22
-        let leadingInset: CGFloat = 18
-        let trailingInset: CGFloat = 14
+    @objc private func showAboutPanel() {
+        NSApp.orderFrontStandardAboutPanel(nil)
+    }
 
-        let button = NSButton(title: title, target: self, action: action)
-        button.isBordered = false
-        button.setButtonType(.momentaryChange)
-        button.alignment = .left
-        button.font = .menuFont(ofSize: 0)
-        button.contentTintColor = .labelColor
-        button.isEnabled = enabled
-        // Grow past the default width when the title needs it (e.g. a
-        // three-digit speed test result) so it's never clipped.
-        let width = max(260, ceil(button.fittingSize.width) + leadingInset + trailingInset)
-        button.frame = NSRect(x: leadingInset, y: 0, width: width - leadingInset - trailingInset, height: height)
-        button.autoresizingMask = [.width, .height]
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
+    }
 
-        let container = HighlightableMenuRowView(button: button, frame: NSRect(x: 0, y: 0, width: width, height: height))
-        container.autoresizesSubviews = true
-        // Stretch to the menu's width when another row makes it wider, so
-        // the hover highlight spans the whole row.
-        container.autoresizingMask = [.width]
-
-        let item = NSMenuItem()
-        item.view = container
-        item.keyEquivalent = keyEquivalent
+    private func makeActionMenuItem(title: String, action: Selector, keyEquivalent: String = "", enabled: Bool = true) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        item.target = self
+        item.isEnabled = enabled
         return item
     }
 
     private func makeSpeedTestMenuItem() -> NSMenuItem {
         let isRunning: Bool = { if case .running = speedTestState { return true } else { return false } }()
-        return makeRowButtonMenuItem(title: speedTestMenuTitle(), action: #selector(runSpeedTest), enabled: !isRunning)
+        return makePersistentMenuActionItem(title: speedTestMenuTitle(), action: #selector(runSpeedTest), enabled: !isRunning)
+    }
+
+    private func makePersistentMenuActionItem(title: String, action: Selector, enabled: Bool) -> NSMenuItem {
+        let height: CGFloat = 22
+        // Match the native menu title column (including its checkmark gutter).
+        let leadingInset: CGFloat = 23
+        let trailingInset: CGFloat = 14
+        let button = NSButton(title: title, target: self, action: action)
+        button.isBordered = false
+        button.setButtonType(.momentaryChange)
+        button.alignment = .left
+        button.font = .menuFont(ofSize: 0)
+        button.isEnabled = enabled
+        let width = max(260, ceil(button.fittingSize.width) + leadingInset + trailingInset)
+        button.frame = NSRect(x: leadingInset, y: 0, width: width - leadingInset - trailingInset, height: height)
+        button.autoresizingMask = [.width, .height]
+
+        let container = PersistentMenuActionRowView(button: button, frame: NSRect(x: 0, y: 0, width: width, height: height))
+        container.autoresizesSubviews = true
+        container.autoresizingMask = [.width]
+        let item = NSMenuItem()
+        item.view = container
+        return item
     }
 
     private func speedTestMenuTitle() -> String {

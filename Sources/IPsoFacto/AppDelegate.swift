@@ -10,6 +10,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var networkMonitor: NetworkMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // AppKit reads this per-application preference for standard tooltips.
+        // Keep the PID command tooltip responsive without changing the
+        // user's global tooltip delay or overriding an explicit app setting.
+        UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 15])
+
         // Runtime stand-in for LSUIElement during `swift run` (no bundle,
         // no Info.plist yet). Harmless once the real Info.plist sets
         // LSUIElement=true in the Phase 3 assembled .app.
